@@ -10,7 +10,11 @@ public class MetroMed implements Directions {
     private static final Semaphore lineCSemaphore = new Semaphore(1);
     private static int activeTrainsB = 0;
     private static final int MAX_TRAINS_B = 10;
-    private static final int TOTAL_TRAINS = 32;
+
+    // Posiciones del taller (avenida 1, calles 34-35)
+    private static final int TALLER_CALLE_NIQUIA = 35;
+    private static final int TALLER_CALLE_ESTRELLA = 34;
+    private static final int TALLER_AVENIDA = 1;
 
     public static void main(String[] args) {
         World.readWorld("MetroMed.kwld");
@@ -18,11 +22,8 @@ public class MetroMed implements Directions {
         World.setDelay(10);
 
         System.out.println("Iniciando operaciones a las 4:20 am");
-
-        // Crear los trenes iniciales
         createInitialTrains();
 
-        // Control de cierre
         new Thread(() -> {
             System.out.println("Presione ENTER para simular las 11 pm...");
             new Scanner(System.in).nextLine();
@@ -32,36 +33,21 @@ public class MetroMed implements Directions {
     }
 
     private static void createInitialTrains() {
-        // Trenes de la línea A
-        new Train(35, 1, North, 0, Color.BLUE, "Taller_Niquia", "A").start();
-        new Train(34, 1, South, 0, Color.GREEN, "Taller_SanJavier", "B").start();
+        // Todos los trenes inician en el taller (avenida 1)
+        new Train(TALLER_CALLE_NIQUIA, TALLER_AVENIDA, South, 0, Color.BLUE, "Taller_Niquia", "A").start();
+        new Train(TALLER_CALLE_ESTRELLA, TALLER_AVENIDA, North, 0, Color.BLUE, "Taller_Estrella", "A").start();
 
-        // Tren de la línea B
         if (canAddTrainB()) {
-            new Train(35, 2, West, 0, Color.BLUE, "Taller_Estrella", "A").start();
+            new Train(TALLER_CALLE_ESTRELLA, TALLER_AVENIDA, East, 0, Color.GREEN, "Taller_SanJavier", "B").start();
             incrementTrainBCount();
         }
     }
 
-    public static boolean isOperating() {
-        return isOperating;
-    }
-
-    public static Semaphore getLineCSemaphore() {
-        return lineCSemaphore;
-    }
-
-    public static synchronized boolean canAddTrainB() {
-        return activeTrainsB < MAX_TRAINS_B;
-    }
-
-    public static synchronized void incrementTrainBCount() {
-        activeTrainsB++;
-    }
-
-    public static synchronized void decrementTrainBCount() {
-        activeTrainsB--;
-    }
+    public static boolean isOperating() { return isOperating; }
+    public static Semaphore getLineCSemaphore() { return lineCSemaphore; }
+    public static synchronized boolean canAddTrainB() { return activeTrainsB < MAX_TRAINS_B; }
+    public static synchronized void incrementTrainBCount() { activeTrainsB++; }
+    public static synchronized void decrementTrainBCount() { activeTrainsB--; }
 }
 
 class Train extends Robot implements Runnable {
@@ -81,18 +67,21 @@ class Train extends Robot implements Runnable {
 
     private static final Map<String, SimplePoint> positions = new HashMap<>();
     private static final Map<String, Boolean> stationOccupied = new HashMap<>();
-    private static final Map<String, Integer> stationCount = new HashMap<>();
 
-    private static final int STATION_WAIT = 3000; // 3 segundos de espera
+    private static final int STATION_WAIT = 3000;
     private static final int COLLISION_CHECK_DELAY = 100;
 
-    // Posiciones exactas de las estaciones
-    private static final SimplePoint NIQUIA = new SimplePoint(45, 1);
-    private static final SimplePoint ESTRELLA = new SimplePoint(35, 1);
-    private static final SimplePoint SAN_JAVIER = new SimplePoint(34, 2);
+    // Posiciones de las estaciones (ajustar según el mundo real)
+    private static final SimplePoint NIQUIA = new SimplePoint(35, 5);    // Ejemplo: Niquía
+    private static final SimplePoint ESTRELLA = new SimplePoint(1, 5);    // Ejemplo: Estrella
+    private static final SimplePoint SAN_JAVIER = new SimplePoint(10, 10); // Ejemplo: San Javier
     private static final SimplePoint SAN_ANTONIO_A = new SimplePoint(14, 16);
     private static final SimplePoint SAN_ANTONIO_B = new SimplePoint(13, 13);
-    private static final SimplePoint TRANSFER_C = new SimplePoint(18, 1);
+
+    // Posiciones del taller
+    private static final SimplePoint TALLER_NIQUIA = new SimplePoint(35, 1);
+    private static final SimplePoint TALLER_ESTRELLA = new SimplePoint(34, 1);
+    private static final SimplePoint TALLER_SAN_JAVIER = new SimplePoint(34, 1);
 
     public Train(int street, int avenue, Direction dir, int beepers, Color color, String nombre, String linea) {
         super(street, avenue, dir, beepers, color);
@@ -114,7 +103,9 @@ class Train extends Robot implements Runnable {
             return;
         }
 
-        // Rutas iniciales desde taller
+        System.out.println(nombre + " (" + linea + ") iniciando desde el taller...");
+
+        // Rutas iniciales desde taller a estaciones
         if (nombre.equals("Taller_Niquia")) {
             routeToNiquia();
         } else if (nombre.equals("Taller_Estrella")) {
@@ -126,7 +117,8 @@ class Train extends Robot implements Runnable {
         // Rutas principales
         while (MetroMed.isOperating()) {
             if (linea.equals("A")) {
-                if (nombre.contains("Niquia")) {
+                System.out.println(nombre + " ejecutando ruta línea A");
+                if (nombre.equals("Taller_Niquia")) {
                     routeNiquiaToEstrella();
                     routeEstrellaToNiquia();
                 } else {
@@ -134,23 +126,25 @@ class Train extends Robot implements Runnable {
                     routeNiquiaToEstrella();
                 }
             } else if (linea.equals("B")) {
+                System.out.println(nombre + " ejecutando ruta línea B");
                 routeSanJavierToSanAntonio();
                 routeSanAntonioToSanJavier();
             }
         }
 
+        // Regreso al taller
         returnToDepot();
         if (linea.equals("B")) {
             MetroMed.decrementTrainBCount();
         }
     }
 
-    private int getCurrentStreet() {
-        return positions.get(nombre).x;
-    }
-
     private int getCurrentAvenue() {
         return positions.get(nombre).y;
+    }
+
+    private int getCurrentStreet() {
+        return positions.get(nombre).x;
     }
 
     private String getCurrentDirection() {
@@ -172,14 +166,15 @@ class Train extends Robot implements Runnable {
     }
 
     private void navigateTo(SimplePoint destination) {
+        System.out.println(nombre + " navegando a (" + destination.x + "," + destination.y + ")");
         while (!reachedDestination(destination) && MetroMed.isOperating()) {
             if (!canMoveForward()) {
                 findAlternativePath();
             } else {
                 safeMove();
 
-                // Verificación y espera en estaciones (beeper)
                 if (nextToABeeper() && isStationPosition()) {
+                    System.out.println(nombre + " en estación - esperando 3 segundos");
                     waitAtStation();
                 }
             }
@@ -190,7 +185,7 @@ class Train extends Robot implements Runnable {
         SimplePoint current = positions.get(nombre);
         return current.equals(NIQUIA) || current.equals(ESTRELLA) ||
                 current.equals(SAN_JAVIER) || current.equals(SAN_ANTONIO_A) ||
-                current.equals(SAN_ANTONIO_B) || current.equals(TRANSFER_C);
+                current.equals(SAN_ANTONIO_B);
     }
 
     private boolean canMoveForward() {
@@ -240,6 +235,7 @@ class Train extends Robot implements Runnable {
             if (positionFree && stationFree && frontIsClear()) {
                 move();
                 positions.put(nombre, nextPos);
+                System.out.println(nombre + " moviéndose a (" + nextPos.x + "," + nextPos.y + ")");
             }
         }
     }
@@ -256,7 +252,7 @@ class Train extends Robot implements Runnable {
     private boolean isStationFree(SimplePoint pos) {
         if (pos.equals(NIQUIA) || pos.equals(ESTRELLA) ||
                 pos.equals(SAN_JAVIER) || pos.equals(SAN_ANTONIO_A) ||
-                pos.equals(SAN_ANTONIO_B) || pos.equals(TRANSFER_C)) {
+                pos.equals(SAN_ANTONIO_B)) {
 
             String stationKey = pos.x + "," + pos.y + "," + getCurrentDirection();
             synchronized (stationOccupied) {
@@ -279,7 +275,7 @@ class Train extends Robot implements Runnable {
 
     private void waitAtStation() {
         try {
-            Thread.sleep(STATION_WAIT); // Espera exactamente 3 segundos
+            Thread.sleep(STATION_WAIT);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } finally {
@@ -324,14 +320,15 @@ class Train extends Robot implements Runnable {
     }
 
     private void returnToDepot() {
+        System.out.println(nombre + " regresando al taller...");
         if (linea.equals("A")) {
-            if (nombre.contains("Niquia")) {
-                navigateTo(new SimplePoint(35, 1));
+            if (nombre.equals("Taller_Niquia")) {
+                navigateTo(TALLER_NIQUIA);
             } else {
-                navigateTo(new SimplePoint(34, 1));
+                navigateTo(TALLER_ESTRELLA);
             }
         } else if (linea.equals("B")) {
-            navigateTo(new SimplePoint(35, 2));
+            navigateTo(TALLER_SAN_JAVIER);
         }
     }
 
