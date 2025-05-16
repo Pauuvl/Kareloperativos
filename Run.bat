@@ -1,3 +1,3 @@
-java -cp ".;KarelJRobot.jar" Racer
+java -cp ".;KarelJRobot.jar" MetroSimulator
 pause
 exit
