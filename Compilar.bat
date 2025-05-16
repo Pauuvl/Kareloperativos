@@ -1,3 +1,3 @@
-java -cp ".;KarelJRobot.jar" Racer.java
+java -cp ".;KarelJRobot.jar" Train.java
 pause
 exit
