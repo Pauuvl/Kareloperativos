@@ -36,3 +36,4 @@ Este proyecto simula un sistema de trenes tipo Metro usando la librería KarelJR
 - No es necesario ejecutar ningún archivo .bat.
 - Asegúrate de que el archivo `KarelJRobot.jar` esté en la carpeta `lib`.
 - El mundo se visualiza automáticamente al ejecutar el programa.
+- Para salir de la ejecución en la consola, presiona **Ctrl+C**.
