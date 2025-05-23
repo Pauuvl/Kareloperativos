@@ -1,47 +1,65 @@
 import kareltherobot.*;
 import java.awt.Color;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.HashSet;
 import java.util.Scanner;
-import java.util.concurrent.Semaphore;
+import java.util.Set;
+import java.util.Map;
+import java.util.HashMap;
 
 public class MetroMed implements Directions {
-    private static boolean isOperating = true;
-    private static final Semaphore lineCSemaphore = new Semaphore(1);
-    private static int activeTrainsB = 0;
-    private static final int MAX_TRAINS_B = 10;
+    public static class Estado {
+        public static final Set<String> positionsOcupadas = new HashSet<>();
+        public static final Object lock = new Object();
+        public static boolean operationalTime = false;
+    }
+
+    private static boolean isOperating = false;
+    private static final int MAX_AVENUE = 14;
 
     public static void main(String[] args) {
         World.readWorld("MetroMed.kwld");
         World.setVisible(true);
         World.setDelay(10);
 
-        System.out.println("Iniciando operaciones a las 4:20 am");
-        createInitialTrains();
+        System.out.println("Sistema inicializado. Trenes en calles 34-35, avenidas 1-14");
+
+        crearTrenesEnCalles34y35();
 
         new Thread(() -> {
-            System.out.println("Presione ENTER para simular las 11 pm...");
+            System.out.println("Presione ENTER para iniciar operaciones (4:30 am)...");
+            new Scanner(System.in).nextLine();
+            isOperating = true;
+            Estado.operationalTime = true;
+            System.out.println("=== INICIO DE OPERACIONES 4:30 AM ===");
+
+            System.out.println("Presione ENTER para finalizar operaciones (11 pm)...");
             new Scanner(System.in).nextLine();
             isOperating = false;
-            System.out.println("Iniciando cierre de operaciones...");
+            Estado.operationalTime = false;
+            synchronized (Estado.lock) {
+                Estado.lock.notifyAll();
+            }
+            System.out.println("=== CIERRE DE OPERACIONES 11 PM ===");
+            System.out.println("Trenes regresando al taller...");
         }).start();
     }
 
-    private static void createInitialTrains() {
-        new Train(35, 1, South, 0, Color.BLACK, "Taller_Niquia", "A").start();
-        new Train(35, 2, North, 0, Color.BLUE, "Taller_Estrella", "A").start();
+    private static void crearTrenesEnCalles34y35() {
+        // Línea A (azul) en calle 34 mirando Este
+        for (int i = 0; i < 22 && (i+1) <= MAX_AVENUE; i++) {
+            String nombre = "A" + (i + 1);
+            new Train(34, 1 + i, East, 0, Color.BLUE, nombre, "A").start();
+        }
 
-        if (canAddTrainB()) {
-            new Train(34, 2, East, 0, Color.GREEN, "Taller_SanJavier", "B").start();
-            incrementTrainBCount();
+        // Línea B (verde) en calle 35 mirando Oeste
+        for (int i = 0; i < 10 && (i+1) <= MAX_AVENUE; i++) {
+            String nombre = "B" + (i + 1);
+            new Train(35, 1 + i, West, 0, Color.GREEN, nombre, "B").start();
         }
     }
 
     public static boolean isOperating() { return isOperating; }
-    public static Semaphore getLineCSemaphore() { return lineCSemaphore; }
-    public static synchronized boolean canAddTrainB() { return activeTrainsB < MAX_TRAINS_B; }
-    public static synchronized void incrementTrainBCount() { activeTrainsB++; }
-    public static synchronized void decrementTrainBCount() { activeTrainsB--; }
+    public static boolean isOperationalTime() { return Estado.operationalTime; }
 }
 
 class Train extends Robot implements Runnable {
@@ -60,16 +78,14 @@ class Train extends Robot implements Runnable {
     }
 
     private static final Map<String, SimplePoint> positions = new HashMap<>();
-    private static final Map<String, Boolean> stationOccupied = new HashMap<>();
-
     private static final int STATION_WAIT = 3000;
     private static final int COLLISION_CHECK_DELAY = 100;
 
-    // Coordenadas actualizadas según el mapa
     private static final SimplePoint NIQUIA = new SimplePoint(35, 19);
     private static final SimplePoint ESTRELLA = new SimplePoint(1, 11);
     private static final SimplePoint SAN_JAVIER = new SimplePoint(16, 1);
     private static final SimplePoint SAN_ANTONIO_B = new SimplePoint(14, 12);
+    private static final SimplePoint TALLER = new SimplePoint(1, 1);
 
     public Train(int street, int avenue, Direction dir, int beepers, Color color, String nombre, String linea) {
         super(street, avenue, dir, beepers, color);
@@ -81,29 +97,86 @@ class Train extends Robot implements Runnable {
         }
     }
 
+    @Override
+    public void move() {
+        String positionFrente = getPositionFrente();
+        String positionActual = getPosition();
+
+        synchronized (MetroMed.Estado.lock) {
+            if (!MetroMed.Estado.positionsOcupadas.contains(positionActual)) {
+                MetroMed.Estado.positionsOcupadas.add(positionActual);
+            }
+
+            while (MetroMed.Estado.positionsOcupadas.contains(positionFrente)) {
+                try {
+                    MetroMed.Estado.lock.wait();
+                    positionFrente = getPositionFrente();
+                    if (!MetroMed.isOperating()) {
+                        MetroMed.Estado.positionsOcupadas.remove(positionActual);
+                        return;
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    MetroMed.Estado.positionsOcupadas.remove(positionActual);
+                    return;
+                }
+            }
+
+            MetroMed.Estado.positionsOcupadas.remove(positionActual);
+            super.move();
+            actualizarPosition();
+            positionActual = getPosition();
+            MetroMed.Estado.positionsOcupadas.add(positionActual);
+            MetroMed.Estado.lock.notifyAll();
+        }
+    }
+
+    private String getPosition() {
+        SimplePoint current = positions.get(nombre);
+        return current.x + "," + current.y;
+    }
+
+    private String getPositionFrente() {
+        SimplePoint nextPos = calculateNextPosition();
+        return nextPos.x + "," + nextPos.y;
+    }
+
+    private void actualizarPosition() {
+        SimplePoint current = positions.get(nombre);
+        if (facingNorth()) current.x++;
+        else if (facingSouth()) current.x--;
+        else if (facingEast()) current.y++;
+        else if (facingWest()) current.y--;
+        positions.put(nombre, current);
+    }
+
     public void start() {
         new Thread(this).start();
     }
 
     @Override
     public void run() {
-        if (linea.equals("B") && !MetroMed.canAddTrainB()) return;
+        try {
+            Thread.sleep((int)(Math.random() * 50));
+        } catch (InterruptedException e) {
+            return;
+        }
 
-        // Rutas iniciales
-        if (nombre.equals("Taller_Niquia")) routeTo(NIQUIA);
-        else if (nombre.equals("Taller_Estrella")) routeTo(ESTRELLA);
-        else if (nombre.equals("Taller_SanJavier")) routeTo(SAN_JAVIER);
+        SimplePoint initialPosition = getInitialPosition();
+        navigateTo(initialPosition);
 
-        // Ciclo principal de operación
+        while (!MetroMed.isOperationalTime()) {
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                return;
+            }
+        }
+
         while (MetroMed.isOperating()) {
             if (linea.equals("A")) {
-                if (nombre.equals("Taller_Niquia")) {
-                    routeBetween(NIQUIA, ESTRELLA);
-                    routeBetween(ESTRELLA, NIQUIA);
-                } else {
-                    routeBetween(ESTRELLA, NIQUIA);
-                    routeBetween(NIQUIA, ESTRELLA);
-                }
+                routeBetween(NIQUIA, ESTRELLA);
+                routeBetween(ESTRELLA, NIQUIA);
             } else {
                 routeBetween(SAN_JAVIER, SAN_ANTONIO_B);
                 turnAround();
@@ -111,77 +184,130 @@ class Train extends Robot implements Runnable {
             }
         }
 
-        returnToDepot();
-        if (linea.equals("B")) MetroMed.decrementTrainBCount();
+        returnToTaller();
     }
 
-    private void routeTo(SimplePoint destination) {
-        navigateTo(destination);
-        handleBeeperWait();
+    private SimplePoint getInitialPosition() {
+        if (linea.equals("A")) {
+            int num = Integer.parseInt(nombre.substring(1));
+            return (num % 2 == 0) ? NIQUIA : ESTRELLA;
+        } else {
+            return SAN_JAVIER;
+        }
     }
 
-    private void routeBetween(SimplePoint start, SimplePoint end) {
-        navigateTo(end);
-        handleBeeperWait();
+    private void returnToTaller() {
+        System.out.println("Tren " + nombre + " regresando al taller...");
+        navigateToTaller(TALLER);
+        System.out.println("Tren " + nombre + " llegó al taller.");
+    }
+
+    private void navigateToTaller(SimplePoint destination) {
+        while (!reachedDestination(destination)) {
+            if (tryMoveToTaller()) {
+                // No checking beepers when going to taller
+            } else {
+                // Only change direction if blocked by wall, not by another train
+                if (!frontIsClear()) {
+                    adjustDirection();
+                }
+                // If blocked by another train, just wait
+            }
+            try {
+                Thread.sleep(COLLISION_CHECK_DELAY);
+            } catch (InterruptedException e) {
+                return;
+            }
+        }
+    }
+
+    private boolean tryMoveToTaller() {
+        if (!frontIsClear()) return false;
+        SimplePoint nextPos = calculateNextPosition();
+        synchronized (positionLock) {
+            if (isPositionFree(nextPos)) {
+                moveToTaller();
+                return true;
+            }
+            return false;
+        }
+    }
+
+    private void moveToTaller() {
+        String positionFrente = getPositionFrente();
+        String positionActual = getPosition();
+
+        synchronized (MetroMed.Estado.lock) {
+            if (!MetroMed.Estado.positionsOcupadas.contains(positionActual)) {
+                MetroMed.Estado.positionsOcupadas.add(positionActual);
+            }
+
+            while (MetroMed.Estado.positionsOcupadas.contains(positionFrente)) {
+                try {
+                    MetroMed.Estado.lock.wait(50); // Short wait for taller navigation
+                    positionFrente = getPositionFrente();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    MetroMed.Estado.positionsOcupadas.remove(positionActual);
+                    return;
+                }
+            }
+
+            MetroMed.Estado.positionsOcupadas.remove(positionActual);
+            super.move(); // Direct call to Robot's move, bypassing our override
+            actualizarPosition();
+            positionActual = getPosition();
+            MetroMed.Estado.positionsOcupadas.add(positionActual);
+            MetroMed.Estado.lock.notifyAll();
+        }
+    }
+
+    private boolean tryMove() {
+        if (!frontIsClear()) return false;
+        SimplePoint nextPos = calculateNextPosition();
+        synchronized (positionLock) {
+            if (isPositionFree(nextPos)) {
+                move();
+                return true;
+            }
+            return false;
+        }
     }
 
     private void navigateTo(SimplePoint destination) {
-        System.out.println(nombre + " navegando a (" + destination.x + "," + destination.y + ")");
         while (!reachedDestination(destination) && MetroMed.isOperating()) {
-            if (canMoveSafely()) {
-                moveSafely();
+            if (tryMove()) {
                 checkForBeeper();
             } else {
-                adjustDirection();
+                // Only change direction if blocked by wall, not by another train
+                if (!frontIsClear()) {
+                    adjustDirection();
+                }
+                // If blocked by another train, just wait
+            }
+            try {
+                Thread.sleep(COLLISION_CHECK_DELAY);
+            } catch (InterruptedException e) {
+                return;
             }
         }
     }
 
     private void checkForBeeper() {
         if (nextToABeeper()) {
-            System.out.println(nombre + " encontró beeper - esperando 3s");
             waitAtStation();
         }
     }
 
-    private boolean canMoveSafely() {
-        if (!frontIsClear()) return false;
-        SimplePoint nextPos = calculateNextPosition();
-        synchronized (positionLock) {
-            return isPositionFree(nextPos);
-        }
-    }
-
-    private void moveSafely() {
-        SimplePoint nextPos = calculateNextPosition();
-        synchronized (positionLock) {
-            super.move();
-            positions.put(nombre, nextPos);
-        }
-    }
-
     private void adjustDirection() {
-        turnRight();
+        if (Math.random() > 0.5) turnRight();
+        else turnLeft();
+
         if (!frontIsClear()) {
             turnAround();
             if (!frontIsClear()) {
                 turnLeft();
             }
-        }
-    }
-
-    private void handleBeeperWait() {
-        if (nextToABeeper()) {
-            System.out.println(nombre + " en estación - esperando 3s");
-            waitAtStation();
-        }
-    }
-
-    private void waitAtStation() {
-        try {
-            Thread.sleep(STATION_WAIT);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
         }
     }
 
@@ -204,17 +330,31 @@ class Train extends Robot implements Runnable {
         return positions.values().stream().noneMatch(p -> p.equals(pos));
     }
 
-    private void returnToDepot() {
-        SimplePoint taller = nombre.equals("Taller_Niquia") ? new SimplePoint(35, 1) :
-                nombre.equals("Taller_Estrella") ? new SimplePoint(34, 1) :
-                        new SimplePoint(34, 2);
-        navigateTo(taller);
+    private void routeBetween(SimplePoint start, SimplePoint end) {
+        navigateTo(end);
+        handleBeeperWait();
     }
 
-    private void turnRight() { for (int i = 0; i < 3; i++) turnLeft(); }
-    private void turnAround() { turnLeft(); turnLeft(); }
+    private void handleBeeperWait() {
+        if (nextToABeeper()) {
+            waitAtStation();
+        }
+    }
 
-    // Métodos auxiliares de posición
-    private int getCurrentAvenue() { return positions.get(nombre).y; }
-    private int getCurrentStreet() { return positions.get(nombre).x; }
+    private void waitAtStation() {
+        try {
+            Thread.sleep(STATION_WAIT);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private void turnRight() {
+        for (int i = 0; i < 3; i++) turnLeft();
+    }
+
+    private void turnAround() {
+        turnLeft();
+        turnLeft();
+    }
 }
