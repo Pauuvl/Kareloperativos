@@ -20,7 +20,7 @@ MetroMed es un simulador de sistema de transporte metro desarrollado en Java usa
 - **Fin**: Simulación de 11:00 PM (segundo ENTER)
 - **Fuera de horario**: Los trenes permanecen en sus posiciones iniciales
 
-## ✅❌ Implementación vs Reglas del Sistema Metro
+## ✅ Implementación vs Reglas del Sistema Metro
 
 ### ✅ **REGLAS IMPLEMENTADAS CORRECTAMENTE:**
 
